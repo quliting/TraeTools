@@ -670,7 +670,7 @@ public partial class DashboardViewModel : ViewModelBase
 
             var name = string.IsNullOrEmpty(acc.Name) ? (acc.Id.Length > 6 ? acc.Id[..6] : acc.Id) : acc.Name!;
             AccountHelpers.CheckinLog(name, $"[仪表盘快签] 开始签到，DeviceId={acc.DeviceId}");
-            var result = await api.ClaimAsync(acc.Token, acc.DeviceId);
+            var result = await AccountHelpers.ClaimWithRiskRetryAsync(acc);
             if (result != null && result.code == 0)
             {
                 CheckinStatus = "已完成 ✓";

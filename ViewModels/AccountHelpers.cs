@@ -11,16 +11,55 @@ public static class AccountHelpers
     /// <summary>缺号则生成不与其它账号重复的 16 位数字设备号（风控要求，多账号共用会触发 9074）。</summary>
     public static void EnsureDeviceId(TraeAccount acc)
     {
-        var used = new System.Collections.Generic.HashSet<string>(
-            MainViewModel.AppConfig?.Accounts.Where(a => a.Id != acc.Id).Select(a => a.DeviceId)
-               .Where(d => !string.IsNullOrWhiteSpace(d)) ?? Array.Empty<string>(),
-            StringComparer.Ordinal);
+        var used = UsedDeviceIds(acc);
         // 已有且不与其它账号重复 → 保持不动（幂等）；为空或与别人相同（手工填错）→ 换发独立新号
         if (!string.IsNullOrWhiteSpace(acc.DeviceId) && !used.Contains(acc.DeviceId)) return;
+        acc.DeviceId = NewDeviceId(used);
+    }
+
+    /// <summary>除 acc 之外其它账号已占用的设备号集合。</summary>
+    private static System.Collections.Generic.HashSet<string> UsedDeviceIds(TraeAccount acc)
+        => new(MainViewModel.AppConfig?.Accounts.Where(a => a.Id != acc.Id).Select(a => a.DeviceId)
+                   .Where(d => !string.IsNullOrWhiteSpace(d)) ?? Array.Empty<string>(),
+               StringComparer.Ordinal);
+
+    /// <summary>生成一个未被占用的 16 位数字设备号。</summary>
+    private static string NewDeviceId(System.Collections.Generic.HashSet<string> used)
+    {
         string id;
         do { id = Random.Shared.NextInt64(1_000_000_000_000_000L, 10_000_000_000_000_000L).ToString(); }
         while (used.Contains(id));
-        acc.DeviceId = id;
+        return id;
+    }
+
+    /// <summary>强制换发全新设备号并落盘（9074 风控自愈用）。</summary>
+    public static void RenewDeviceId(TraeAccount acc)
+    {
+        acc.DeviceId = NewDeviceId(UsedDeviceIds(acc));
+        try { MainViewModel.AppConfig?.Save(); } catch { /* 忽略 */ }
+    }
+
+    /// <summary>
+    /// 执行签到 Claim；命中 9074「当前参与用户太多」说明该账号的设备号已被风控标记，
+    /// 换发全新设备号后重试（与云端 checkin.py 同策略，最多 maxAttempts 次）。
+    /// </summary>
+    public static async Task<CheckinStatus?> ClaimWithRiskRetryAsync(TraeAccount acc, int maxAttempts = 5)
+    {
+        var api = MainViewModel.CheckinApi;
+        if (api == null || string.IsNullOrEmpty(acc.Token)) return null;
+        var name = string.IsNullOrEmpty(acc.Name) ? (acc.Id.Length > 6 ? acc.Id[..6] : acc.Id) : acc.Name!;
+
+        var result = await api.ClaimAsync(acc.Token, acc.DeviceId);
+        int attempt = 1;
+        while (result is { code: 9074 } && attempt < maxAttempts)
+        {
+            attempt++;
+            RenewDeviceId(acc);
+            CheckinLog(name, $"命中风控 9074（设备号被标记），换新设备号 {acc.DeviceId} 重试（第 {attempt} 次）");
+            await Task.Delay(Random.Shared.Next(800, 1500));
+            result = await api.ClaimAsync(acc.Token, acc.DeviceId);
+        }
+        return result;
     }
 
     /// <summary>校验/换新 Token：失效时用 X-Cloudide-Session 静默换新并保存；返回是否持有可用 token。</summary>

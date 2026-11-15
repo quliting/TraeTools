@@ -455,7 +455,7 @@ public partial class CheckinViewModel : ViewModelBase
         }
 
         AccountHelpers.CheckinLog(displayName, $"调用 ClaimAsync，DeviceId={acc.DeviceId}");
-        var result = await api.ClaimAsync(acc.Token, acc.DeviceId);
+        var result = await AccountHelpers.ClaimWithRiskRetryAsync(acc);
         if (result == null || result.code != 0)
         {
             var code = result?.code ?? -1;
