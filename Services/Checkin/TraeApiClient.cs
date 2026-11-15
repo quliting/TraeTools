@@ -33,6 +33,12 @@ public class TraeApiClient
 
     public string? LastError { get; private set; }
 
+    /// <summary>
+    /// 最近一次会话换新时服务端回写的滚动会话（Set-Cookie: X-Cloudide-Session=...）。
+    /// 服务端未轮换时为 null，调用方可据此把会话的过期时间往后顺延。
+    /// </summary>
+    public string? LastSessionCookie { get; private set; }
+
     public TraeApiClient()
     {
         _http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
@@ -75,6 +81,7 @@ public class TraeApiClient
     /// </summary>
     public async Task<string?> GetUserTokenAsync(string session)
     {
+        LastSessionCookie = null;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post, BaseUrl + "/cloudide/api/v3/common/GetUserToken");
@@ -82,6 +89,8 @@ public class TraeApiClient
             req.Headers.TryAddWithoutValidation("Referer", "https://www.trae.cn/");
             req.Headers.TryAddWithoutValidation("Origin", "https://www.trae.cn");
             using var resp = await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead);
+            // 服务端若下发新的 X-Cloudide-Session，记录下来用于顺延会话有效期（滚动续期）
+            LastSessionCookie = ReadSessionCookie(resp);
             var json = await resp.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(json);
             if (doc.RootElement.TryGetProperty("Result", out var result) &&
@@ -98,6 +107,24 @@ public class TraeApiClient
             LastError = ex.Message;
             return null;
         }
+    }
+
+    /// <summary>从响应头里取出 X-Cloudide-Session 的新值；服务端未回写时返回 null。</summary>
+    private static string? ReadSessionCookie(HttpResponseMessage resp)
+    {
+        if (!resp.Headers.TryGetValues("Set-Cookie", out var values)) return null;
+        const string name = "X-Cloudide-Session=";
+        foreach (var raw in values)
+        {
+            var text = raw.TrimStart();
+            if (!text.StartsWith(name, StringComparison.OrdinalIgnoreCase)) continue;
+            var value = text[name.Length..];
+            var end = value.IndexOf(';');
+            if (end >= 0) value = value[..end];
+            value = value.Trim();
+            if (value.Length >= 16) return value;
+        }
+        return null;
     }
 
     /// <summary>查询剩余积分（汇总所有资格包的剩余额度）。</summary>

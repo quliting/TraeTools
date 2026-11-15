@@ -86,6 +86,12 @@ public static class AccountHelpers
                 acc.Token = renewed;
                 acc.AccountUid = TokenUtils.ParseAccountUid(renewed);
                 acc.TokenUpdatedAt = DateTime.Now;
+                // 服务端在换新时可能回写新的会话 Cookie：存下来，会话有效期随之顺延（滚动续期）
+                if (!string.IsNullOrEmpty(api.LastSessionCookie) && api.LastSessionCookie != acc.Session)
+                {
+                    acc.Session = api.LastSessionCookie;
+                    CheckinLog(name, "服务端回写了新会话，Session 已顺延保存");
+                }
                 try { cfg.Save(); } catch { /* 忽略 */ }
                 CheckinLog(name, $"Session 换新 Token 成功，新 AccountUid={acc.AccountUid}");
                 return true;

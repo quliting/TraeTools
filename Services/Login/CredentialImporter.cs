@@ -206,7 +206,8 @@ public static class CredentialImporter
                 Ok = true,
                 Kind = kind,
                 Token = token,
-                Session = s,
+                // 服务端若回写了新的会话，保存新的那个，避免下次续期用旧值
+                Session = api.LastSessionCookie ?? s,
                 Message = "已识别为会话 Cookie，并成功换取 Token",
             };
         }

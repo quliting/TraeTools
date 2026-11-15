@@ -178,6 +178,9 @@ public static class LocalClientImporter
             {
                 var api = new TraeCheckin.TraeApiClient();
                 finalToken = await api.GetUserTokenAsync(session);
+                // 服务端若回写了新的会话，优先保存新的那个
+                if (finalToken != null && !string.IsNullOrEmpty(api.LastSessionCookie))
+                    session = api.LastSessionCookie;
                 note = finalToken == null
                     ? "已读取到会话，但换取 Token 失败（会话可能已过期）"
                     : "已由客户端会话换取 Token";
